@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>GBA Screen</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    #container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-crisp-edges;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    /* Retro LCD Grid Effect */
+    .filter-lcd::after {
+      content: " ";
+      display: block;
+      position: absolute;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+      background-size: 100% 3px, 3px 100%;
+      pointer-events: none;
+      opacity: 0.8;
+    }
+  </style>
+
+  <script src="resources/xhr.js"></script>
+  <script src="resources/biosbin.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/arm.js"></script>
+  <script src="js/thumb.js"></script>
+  <script src="js/mmu.js"></script>
+  <script src="js/io.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/video.js"></script>
+  <script src="js/video/proxy.js"></script>
+  <script src="js/video/software.js"></script>
+  <script src="js/irq.js"></script>
+  <script src="js/keypad.js"></script>
+  <script src="js/sio.js"></script>
+  <script src="js/savedata.js"></script>
+  <script src="js/gpio.js"></script>
+  <script src="js/gba.js"></script>
+  <script src="gba_bridge.js"></script>
+</head>
+<body>
+  <div id="container" class="filter-lcd">
+    <canvas id="gba-canvas" width="240" height="160"></canvas>
+  </div>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', function() {
+      var canvas = document.getElementById('gba-canvas');
+      window.GbaBridge.init(canvas);
+
+      // Listen for messages from Flutter via postMessage or Flutter JavascriptChannel
+      window.handleFlutterMessage = function(data) {
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch(e) {
+            return;
+          }
+        }
+        if (!data || !data.action) return;
+
+        switch(data.action) {
+          case 'buttonDown':
+            window.GbaBridge.buttonDown(data.button);
+            break;
+          case 'buttonUp':
+            window.GbaBridge.buttonUp(data.button);
+            break;
+          case 'loadRomUrl':
+            window.GbaBridge.loadRomFromUrl(data.url, data.title);
+            break;
+          case 'loadRomBase64':
+            window.GbaBridge.loadRomBase64(data.base64, data.title);
+            break;
+          case 'play':
+            window.GbaBridge.play();
+            break;
+          case 'pause':
+            window.GbaBridge.pause();
+            break;
+          case 'togglePause':
+            window.GbaBridge.togglePause();
+            break;
+          case 'reset':
+            window.GbaBridge.reset();
+            break;
+          case 'setVolume':
+            window.GbaBridge.setVolume(data.volume);
+            break;
+          case 'setMute':
+            window.GbaBridge.setMute(data.muted);
+            break;
+          case 'setSpeed':
+            window.GbaBridge.setSpeed(data.multiplier);
+            break;
+          case 'saveState':
+            var stateJson = window.GbaBridge.exportStateString(data.slot);
+            sendToFlutter({ type: 'saveStateResult', success: !!stateJson, slot: data.slot, romId: data.romId, stateData: stateJson });
+            break;
+          case 'loadState':
+            var ok = window.GbaBridge.loadState(data.slot);
+            sendToFlutter({ type: 'loadStateResult', success: ok, slot: data.slot });
+            break;
+          case 'loadStateJson':
+            var ok = window.GbaBridge.importStateString(data.stateJson);
+            sendToFlutter({ type: 'loadStateResult', success: ok });
+            break;
+          case 'setFilter':
+            var container = document.getElementById('container');
+            container.className = data.filter === 'lcd' ? 'filter-lcd' : '';
+            break;
+        }
+      };
+
+      window.addEventListener('message', function(event) {
+        window.handleFlutterMessage(event.data);
+      });
+
+      function sendToFlutter(msg) {
+        if (window.FlutterChannel && window.FlutterChannel.postMessage) {
+          window.FlutterChannel.postMessage(JSON.stringify(msg));
+        } else if (window.parent && window.parent !== window) {
+          window.parent.postMessage(msg, '*');
+        }
+      }
+
+      window.onGbaFpsUpdate = function(fps) {
+        sendToFlutter({ type: 'fps', value: fps });
+      };
+
+      window.onGbaRomLoaded = function(title) {
+        sendToFlutter({ type: 'romLoaded', title: title });
+      };
+    });
+  </script>
+</body>
+</html>
