@@ -35,6 +35,8 @@ class GbaController extends ChangeNotifier {
 
   Timer? _autoSaveTimer;
   AppLifecycleListener? _lifecycleListener;
+  bool _wasPausedBeforeBackground = false;
+  bool _stateRestoredForCurrentLoad = false;
   final Completer<void> _preferencesLoadedCompleter = Completer<void>();
 
   // Getters
@@ -90,21 +92,44 @@ class GbaController extends ChangeNotifier {
             state == AppLifecycleState.detached ||
             state == AppLifecycleState.hidden) {
           _handleAppBackgrounded();
+        } else if (state == AppLifecycleState.resumed) {
+          _handleAppResumed();
         }
       },
     );
   }
 
   void _handleAppBackgrounded() {
-    if (_isRunning && _activeRomId != null) {
-      _bridge.saveState(0, romId: _activeRomId);
+    if (_isRunning) {
+      if (_activeRomId != null) {
+        _bridge.saveState(0, romId: _activeRomId);
+      }
+      _wasPausedBeforeBackground = _isPaused;
+      _bridge.pause();
+      _bridge.setMute(true);
+      _isPaused = true;
       _savePreferences();
+      notifyListeners();
     }
+  }
+
+  void _handleAppResumed() {
+    if (_isRunning && !_wasPausedBeforeBackground) {
+      _bridge.setMute(_isMuted);
+      _bridge.play();
+      _isPaused = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> ensurePreferencesLoaded() async {
+    await _preferencesLoadedCompleter.future;
   }
 
   void _startAutoSaveTimer() {
     _autoSaveTimer?.cancel();
-    _autoSaveTimer = Timer.periodic(const Duration(seconds: 20), (timer) {
+    // Auto-save every 3 seconds so state is never lost even if the app is closed abruptly
+    _autoSaveTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       if (_isRunning && !_isPaused && _activeRomId != null) {
         _bridge.saveState(0, romId: _activeRomId);
       }
@@ -130,23 +155,40 @@ class GbaController extends ChangeNotifier {
       _landscapeFullscreen = prefs.getBool('gba_landscape_fullscreen') ?? false;
       _selectedSaveSlot = prefs.getInt('gba_selected_save_slot') ?? 1;
 
+      // 1. Always load disk library first (physical persistent source of truth)
+      final diskRoms = await _romStorage.loadLibrary();
+      final Map<String, SavedRomEntry> romMap = {for (final r in diskRoms) r.id: r};
+
+      // 2. Also merge any entries from SharedPreferences
       final romsJsonList = prefs.getStringList('gba_saved_roms_list');
-      if (romsJsonList != null) {
-        _savedRoms = romsJsonList
-            .map((str) {
-              try {
-                return SavedRomEntry.fromJson(jsonDecode(str) as Map<String, dynamic>);
-              } catch (_) {
-                return null;
-              }
-            })
-            .whereType<SavedRomEntry>()
-            .toList();
+      if (romsJsonList != null && romsJsonList.isNotEmpty) {
+        for (final str in romsJsonList) {
+          try {
+            final entry = SavedRomEntry.fromJson(jsonDecode(str) as Map<String, dynamic>);
+            romMap.putIfAbsent(entry.id, () => entry);
+          } catch (_) {}
+        }
+      }
+      _savedRoms = romMap.values.toList();
+      if (_savedRoms.isNotEmpty) {
+        final list = _savedRoms.map((r) => jsonEncode(r.toJson())).toList();
+        await prefs.setStringList('gba_saved_roms_list', list);
       }
 
+      // 3. Load active ROM
       _activeRomId = prefs.getString('gba_active_rom_id');
       _activeRomType = prefs.getString('gba_active_rom_type');
       _activeRomTitle = prefs.getString('gba_active_rom_title');
+
+      if (_activeRomId == null) {
+        final diskActive = await _romStorage.loadActiveGameMetadata();
+        if (diskActive != null) {
+          _activeRomId = diskActive['id'] as String?;
+          _activeRomType = diskActive['type'] as String?;
+          _activeRomTitle = diskActive['title'] as String?;
+        }
+      }
+
       if (_activeRomTitle != null && _activeRomTitle!.isNotEmpty) {
         _currentRomTitle = _activeRomTitle!;
         _isRestoring = true;
@@ -162,6 +204,10 @@ class GbaController extends ChangeNotifier {
   }
 
   Future<void> _savePreferences() async {
+    // Guard against overwriting storage before initial preferences have finished loading
+    if (!_preferencesLoadedCompleter.isCompleted) {
+      await _preferencesLoadedCompleter.future;
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('gba_skin_id', _skin.id);
@@ -188,6 +234,18 @@ class GbaController extends ChangeNotifier {
         await prefs.setString('gba_active_rom_title', _activeRomTitle!);
       } else {
         await prefs.remove('gba_active_rom_title');
+      }
+
+      // Also persist library and active game to disk backup
+      if (_savedRoms.isNotEmpty) {
+        await _romStorage.saveLibrary(_savedRoms);
+      }
+      if (_activeRomId != null && _activeRomType != null) {
+        await _romStorage.saveActiveGameMetadata({
+          'id': _activeRomId,
+          'type': _activeRomType,
+          'title': _activeRomTitle,
+        });
       }
     } catch (_) {}
   }
@@ -219,9 +277,13 @@ class GbaController extends ChangeNotifier {
       );
       loadBuiltInRom(rom);
     } else if (_activeRomType == 'custom') {
-      final matching = _savedRoms.where((r) => r.id == _activeRomId);
+      final matching = _savedRoms.where(
+        (r) => r.id == _activeRomId || (_activeRomTitle != null && r.title == _activeRomTitle),
+      );
       if (matching.isNotEmpty) {
         await loadSavedRom(matching.first);
+      } else if (_savedRoms.isNotEmpty) {
+        await loadSavedRom(_savedRoms.first);
       } else {
         _isRestoring = false;
         notifyListeners();
@@ -233,17 +295,31 @@ class GbaController extends ChangeNotifier {
   }
 
   Future<void> _tryRestoreSavedState() async {
-    if (_activeRomId == null) return;
+    if (_activeRomId == null || _stateRestoredForCurrentLoad) return;
     try {
-      // 1. Check auto-save slot (slot 0) first
+      // 1. Check auto-save slot (slot 0) first from persistent disk storage
       String? stateJson = await _romStorage.loadStateData(_activeRomId!, 0);
       // 2. If no auto-save exists, check selected quick save slot (e.g. slot 1)
       if (stateJson == null || stateJson.isEmpty) {
         stateJson = await _romStorage.loadStateData(_activeRomId!, _selectedSaveSlot);
       }
+      // 3. Fallback: check any existing save slot (1 to 5)
+      if (stateJson == null || stateJson.isEmpty) {
+        for (int s = 1; s <= 5; s++) {
+          final candidate = await _romStorage.loadStateData(_activeRomId!, s);
+          if (candidate != null && candidate.isNotEmpty) {
+            stateJson = candidate;
+            break;
+          }
+        }
+      }
       if (stateJson != null && stateJson.isNotEmpty) {
-        await Future.delayed(const Duration(milliseconds: 150));
+        _stateRestoredForCurrentLoad = true;
+        await Future.delayed(const Duration(milliseconds: 300));
         _bridge.loadStateJson(stateJson);
+      } else {
+        await Future.delayed(const Duration(milliseconds: 300));
+        _bridge.loadState(0);
       }
     } catch (_) {}
   }
@@ -263,6 +339,8 @@ class GbaController extends ChangeNotifier {
     if (_isRunning && _activeRomId != null && _activeRomId != rom.id) {
       _bridge.saveState(0, romId: _activeRomId);
     }
+    _stateRestoredForCurrentLoad = false;
+    setSpeed(1.0);
     _activeRomId = rom.id;
     _activeRomType = 'builtIn';
     _activeRomTitle = rom.title;
@@ -300,7 +378,8 @@ class GbaController extends ChangeNotifier {
         if (bytes.isEmpty) return false;
 
         final cleanTitle = file.name.replaceAll(RegExp(r'\.(gba|bin|agb)$', caseSensitive: false), '');
-        final id = '${DateTime.now().millisecondsSinceEpoch}_${cleanTitle.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+        final cleanId = cleanTitle.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+        final id = 'rom_$cleanId';
 
         final entry = SavedRomEntry(
           id: id,
@@ -320,19 +399,29 @@ class GbaController extends ChangeNotifier {
         if (_isRunning && _activeRomId != null && _activeRomId != id) {
           _bridge.saveState(0, romId: _activeRomId);
         }
+        _stateRestoredForCurrentLoad = false;
         _activeRomId = id;
         _activeRomType = 'custom';
         _activeRomTitle = cleanTitle;
         _currentRomTitle = cleanTitle;
+        await _romStorage.saveLibrary(_savedRoms);
         await _savePreferences();
         _startAutoSaveTimer();
 
+        setSpeed(1.0);
         // Run game
         final b64 = base64Encode(bytes);
         _bridge.loadRomBase64(b64, cleanTitle);
         _isRunning = true;
         _isPaused = false;
         notifyListeners();
+
+        // Guaranteed fallback restore
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!_stateRestoredForCurrentLoad) {
+            _tryRestoreSavedState();
+          }
+        });
         return true;
       }
     } catch (e) {
@@ -348,6 +437,7 @@ class GbaController extends ChangeNotifier {
       }
       final bytes = await _romStorage.loadRomBytes(entry.id);
       if (bytes != null && bytes.isNotEmpty) {
+        _stateRestoredForCurrentLoad = false;
         _activeRomId = entry.id;
         _activeRomType = 'custom';
         _activeRomTitle = entry.title;
@@ -355,11 +445,19 @@ class GbaController extends ChangeNotifier {
         _savePreferences();
         _startAutoSaveTimer();
 
+        setSpeed(1.0);
         final b64 = base64Encode(bytes);
         _bridge.loadRomBase64(b64, entry.title);
         _isRunning = true;
         _isPaused = false;
         notifyListeners();
+
+        // Guaranteed fallback restore
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!_stateRestoredForCurrentLoad) {
+            _tryRestoreSavedState();
+          }
+        });
         return true;
       }
     } catch (e) {
@@ -368,12 +466,45 @@ class GbaController extends ChangeNotifier {
     return false;
   }
 
+  Future<void> restartCurrentGame() async {
+    if (_activeRomId == null) return;
+    _stateRestoredForCurrentLoad = true;
+    _autoSaveTimer?.cancel();
+    await _romStorage.deleteStateData(_activeRomId!, 0);
+
+    setSpeed(1.0);
+    _isRunning = true;
+    _isPaused = false;
+
+    if (_activeRomType == 'builtIn') {
+      final rom = GbaRomInfo.builtInRoms.firstWhere(
+        (r) => r.id == _activeRomId,
+        orElse: () => GbaRomInfo.builtInRoms.first,
+      );
+      if (kIsWeb) {
+        final relativeUrl = rom.id == 'waimanu' ? 'roms/waimanu.gba' : 'roms/yahtzee.gba';
+        _bridge.loadRomUrl(relativeUrl, rom.title);
+      } else {
+        final byteData = await rootBundle.load(rom.assetPath);
+        final bytes = byteData.buffer.asUint8List();
+        final b64 = base64Encode(bytes);
+        _bridge.loadRomBase64(b64, rom.title);
+      }
+    } else if (_activeRomType == 'custom') {
+      final bytes = await _romStorage.loadRomBytes(_activeRomId!);
+      if (bytes != null && bytes.isNotEmpty) {
+        final b64 = base64Encode(bytes);
+        _bridge.loadRomBase64(b64, _currentRomTitle);
+      }
+    }
+    _startAutoSaveTimer();
+    notifyListeners();
+  }
+
   Future<void> deleteSavedRom(String id) async {
     try {
       await _romStorage.deleteRom(id);
-      for (int slot = 0; slot <= 5; slot++) {
-        await _romStorage.deleteStateData(id, slot);
-      }
+      // Retain state data so user's game progress is not lost if they re-add the ROM
       _savedRoms.removeWhere((r) => r.id == id);
       if (_activeRomId == id) {
         _activeRomId = null;
@@ -384,6 +515,7 @@ class GbaController extends ChangeNotifier {
         _autoSaveTimer?.cancel();
         _bridge.reset();
       }
+      await _romStorage.saveLibrary(_savedRoms);
       await _savePreferences();
       notifyListeners();
     } catch (e) {
@@ -396,6 +528,9 @@ class GbaController extends ChangeNotifier {
       _bridge.play();
       _isPaused = false;
     } else {
+      if (_isRunning && _activeRomId != null) {
+        _bridge.saveState(0, romId: _activeRomId);
+      }
       _bridge.pause();
       _isPaused = true;
     }
@@ -405,6 +540,7 @@ class GbaController extends ChangeNotifier {
   void resetGame() {
     _bridge.reset();
     _isPaused = false;
+    setSpeed(1.0);
     notifyListeners();
   }
 

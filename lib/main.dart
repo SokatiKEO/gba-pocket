@@ -4,7 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'screens/emulator_screen.dart';
 import 'services/gba_controller.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Edge-to-edge transparent system bars for immersive mobile experience
@@ -18,7 +18,7 @@ void main() {
   );
 
   // Allow both portrait and landscape orientation
-  SystemChrome.setPreferredOrientations([
+  await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
     DeviceOrientation.landscapeLeft,
@@ -26,6 +26,7 @@ void main() {
   ]);
 
   final controller = GbaController();
+  await controller.ensurePreferencesLoaded();
 
   runApp(GbaEmulatorApp(controller: controller));
 }

@@ -165,6 +165,21 @@
       window.onGbaRomLoaded = function(title) {
         sendToFlutter({ type: 'romLoaded', title: title });
       };
+
+      document.addEventListener('visibilitychange', function() {
+        if (!window.GbaBridge) return;
+        if (document.hidden) {
+          if (window.GbaBridge.isLoaded && !window.GbaBridge.isPaused) {
+            window.GbaBridge._wasRunningBeforeHide = true;
+            window.GbaBridge.pause();
+          }
+        } else {
+          if (window.GbaBridge.isLoaded && window.GbaBridge._wasRunningBeforeHide) {
+            window.GbaBridge._wasRunningBeforeHide = false;
+            window.GbaBridge.play();
+          }
+        }
+      });
     });
   </script>
 </body>

@@ -80,4 +80,42 @@ class GbaRomStorageImpl implements GbaRomStorage {
       web.window.localStorage.removeItem(key);
     } catch (_) {}
   }
+
+  @override
+  Future<void> saveLibrary(List<SavedRomEntry> entries) async {
+    try {
+      final jsonStr = jsonEncode(entries.map((e) => e.toJson()).toList());
+      web.window.localStorage.setItem('gba_library_backup', jsonStr);
+    } catch (_) {}
+  }
+
+  @override
+  Future<List<SavedRomEntry>> loadLibrary() async {
+    try {
+      final str = web.window.localStorage.getItem('gba_library_backup');
+      if (str != null && str.isNotEmpty) {
+        final list = jsonDecode(str) as List<dynamic>;
+        return list.map((item) => SavedRomEntry.fromJson(item as Map<String, dynamic>)).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  @override
+  Future<void> saveActiveGameMetadata(Map<String, dynamic> data) async {
+    try {
+      web.window.localStorage.setItem('gba_active_game_backup', jsonEncode(data));
+    } catch (_) {}
+  }
+
+  @override
+  Future<Map<String, dynamic>?> loadActiveGameMetadata() async {
+    try {
+      final str = web.window.localStorage.getItem('gba_active_game_backup');
+      if (str != null && str.isNotEmpty) {
+        return jsonDecode(str) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
 }

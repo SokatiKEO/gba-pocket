@@ -289,6 +289,10 @@ class GameBoyAdvanceRenderProxy {
 			++this.delay;
 		}
 	}
+	skipScanline(y) {
+	}
+	skipFinishDraw(caller) {
+	}
 	finishDraw(caller) {
 		this.caller = caller;
 		if (!this.skipFrame) {

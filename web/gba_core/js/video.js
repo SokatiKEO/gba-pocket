@@ -24,6 +24,7 @@ class GameBoyAdvanceVideo {
 
 		this.drawCallback = function () {};
 		this.vblankCallback = function () {};
+		this.skipRendering = false;
 	}
 	clear() {
 		this.renderPath.clear(this.cpu.mmu);
@@ -122,7 +123,13 @@ class GameBoyAdvanceVideo {
 				switch (this.vcount) {
 					case this.VERTICAL_PIXELS:
 						this.inVblank = true;
-						this.renderPath.finishDraw(this);
+						if (this.skipRendering) {
+							if (this.renderPath.skipFinishDraw) {
+								this.renderPath.skipFinishDraw(this);
+							}
+						} else {
+							this.renderPath.finishDraw(this);
+						}
 						this.nextVblankIRQ = this.nextEvent + this.TOTAL_LENGTH;
 						this.cpu.mmu.runVblankDmas();
 						if (this.vblankIRQ) {
@@ -135,7 +142,9 @@ class GameBoyAdvanceVideo {
 						break;
 					case this.VERTICAL_TOTAL_PIXELS:
 						this.vcount = 0;
-						this.renderPath.startDraw();
+						if (!this.skipRendering) {
+							this.renderPath.startDraw();
+						}
 						break;
 				}
 
@@ -146,7 +155,13 @@ class GameBoyAdvanceVideo {
 				}
 
 				if (this.vcount < this.VERTICAL_PIXELS) {
-					this.renderPath.drawScanline(this.vcount);
+					if (this.skipRendering) {
+						if (this.renderPath.skipScanline) {
+							this.renderPath.skipScanline(this.vcount);
+						}
+					} else {
+						this.renderPath.drawScanline(this.vcount);
+					}
 				}
 			} else {
 				// Begin Hblank

@@ -19,11 +19,26 @@ class GbaScreenView extends StatelessWidget {
 
     if (isFullscreen) {
       return Center(
-        child: AspectRatio(
-          aspectRatio: 3 / 2,
-          child: Container(
-            color: Colors.black,
-            child: _buildViewport(context, skin),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: AspectRatio(
+            aspectRatio: 3 / 2,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white12, width: 1.5),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black54,
+                    blurRadius: 10,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: _buildViewport(context, skin),
+            ),
           ),
         ),
       );

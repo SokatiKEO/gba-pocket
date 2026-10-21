@@ -270,7 +270,7 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Virtual D-Pad
-              GbaDpad(controller: widget.controller, size: 144),
+              GbaDpad(controller: widget.controller, size: 156),
 
               // Virtual A/B Buttons
               GbaActionButtons(controller: widget.controller, buttonSize: 56),
@@ -293,61 +293,63 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
     if (isFullscreen) {
       return Container(
         color: Colors.black,
-        child: Stack(
-          children: [
-            // Maximized 3:2 Game Viewport centered across the display
-            Positioned.fill(
-              child: Center(
-                child: GbaScreenView(
-                  key: _screenKey,
-                  controller: widget.controller,
-                  isFullscreen: true,
+        child: SafeArea(
+          child: Stack(
+            children: [
+              // Maximized 3:2 Game Viewport centered across the display
+              Positioned.fill(
+                child: Center(
+                  child: GbaScreenView(
+                    key: _screenKey,
+                    controller: widget.controller,
+                    isFullscreen: true,
+                  ),
                 ),
               ),
-            ),
 
-            // Semi-transparent controls in the exact same coordinates
-            Positioned.fill(
-              child: Row(
-                children: [
-                  // Left Column Controls (near left edge, transparent)
-                  Expanded(
-                    flex: 4,
-                    child: Opacity(
-                      opacity: 0.40,
-                      child: _buildLeftLandscapeControls(skin, isFullscreen: true),
+              // Semi-transparent controls in the exact same coordinates
+              Positioned.fill(
+                child: Row(
+                  children: [
+                    // Left Column Controls (near left edge, transparent)
+                    Expanded(
+                      flex: 4,
+                      child: Opacity(
+                        opacity: 0.40,
+                        child: _buildLeftLandscapeControls(skin, isFullscreen: true),
+                      ),
                     ),
-                  ),
 
-                  // Center Spacer with floating toolbar at top
-                  Expanded(
-                    flex: 6,
-                    child: Column(
-                      children: [
-                        Align(
-                          alignment: Alignment.topCenter,
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: _buildLandscapeToolbar(context, isFullscreen: true),
+                    // Center Spacer with floating toolbar at top
+                    Expanded(
+                      flex: 6,
+                      child: Column(
+                        children: [
+                          Align(
+                            alignment: Alignment.topCenter,
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: _buildLandscapeToolbar(context, isFullscreen: true),
+                            ),
                           ),
-                        ),
-                        const Spacer(),
-                      ],
+                          const Spacer(),
+                        ],
+                      ),
                     ),
-                  ),
 
-                  // Right Column Controls (near right edge, transparent)
-                  Expanded(
-                    flex: 4,
-                    child: Opacity(
-                      opacity: 0.40,
-                      child: _buildRightLandscapeControls(skin, isFullscreen: true),
+                    // Right Column Controls (near right edge, transparent)
+                    Expanded(
+                      flex: 4,
+                      child: Opacity(
+                        opacity: 0.40,
+                        child: _buildRightLandscapeControls(skin, isFullscreen: true),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
@@ -397,14 +399,45 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
   }
 
   Widget _buildLeftLandscapeControls(GbaSkin skin, {bool isFullscreen = false}) {
+    if (isFullscreen) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 10, top: 8, right: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildBumperButton(
+                  label: 'L',
+                  button: GbaButton.l,
+                  isLeft: true,
+                ),
+                const SizedBox(width: 8),
+                _buildPillMini(
+                  label: 'SELECT',
+                  button: GbaButton.select,
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          Padding(
+            padding: const EdgeInsets.only(left: 12, bottom: 10),
+            child: GbaDpad(
+              controller: widget.controller,
+              size: 176,
+            ),
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: EdgeInsets.only(
-            left: isFullscreen ? 6 : 16,
-            top: isFullscreen ? 6 : 4,
-          ),
+          padding: const EdgeInsets.only(left: 16, top: 4),
           child: _buildBumperButton(
             label: 'L',
             button: GbaButton.l,
@@ -413,18 +446,15 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
         ),
         const Spacer(),
         Padding(
-          padding: EdgeInsets.only(left: isFullscreen ? 4 : 12),
+          padding: const EdgeInsets.only(left: 12),
           child: GbaDpad(
             controller: widget.controller,
-            size: isFullscreen ? 168 : 144,
+            size: 156,
           ),
         ),
         const Spacer(),
         Padding(
-          padding: EdgeInsets.only(
-            left: isFullscreen ? 8 : 20,
-            bottom: isFullscreen ? 8 : 8,
-          ),
+          padding: const EdgeInsets.only(left: 20, bottom: 8),
           child: Row(
             children: [
               _buildPillMini(
@@ -439,14 +469,45 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
   }
 
   Widget _buildRightLandscapeControls(GbaSkin skin, {bool isFullscreen = false}) {
+    if (isFullscreen) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 10, top: 8, left: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildPillMini(
+                  label: 'START',
+                  button: GbaButton.start,
+                ),
+                const SizedBox(width: 8),
+                _buildBumperButton(
+                  label: 'R',
+                  button: GbaButton.r,
+                  isLeft: false,
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          Padding(
+            padding: const EdgeInsets.only(right: 12, bottom: 10),
+            child: GbaActionButtons(
+              controller: widget.controller,
+              buttonSize: 58,
+            ),
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Padding(
-          padding: EdgeInsets.only(
-            right: isFullscreen ? 6 : 16,
-            top: isFullscreen ? 6 : 4,
-          ),
+          padding: const EdgeInsets.only(right: 16, top: 4),
           child: _buildBumperButton(
             label: 'R',
             button: GbaButton.r,
@@ -455,18 +516,15 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
         ),
         const Spacer(),
         Padding(
-          padding: EdgeInsets.only(right: isFullscreen ? 4 : 12),
+          padding: const EdgeInsets.only(right: 12),
           child: GbaActionButtons(
             controller: widget.controller,
-            buttonSize: isFullscreen ? 58 : 52,
+            buttonSize: 52,
           ),
         ),
         const Spacer(),
         Padding(
-          padding: EdgeInsets.only(
-            right: isFullscreen ? 8 : 20,
-            bottom: isFullscreen ? 8 : 8,
-          ),
+          padding: const EdgeInsets.only(right: 20, bottom: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [

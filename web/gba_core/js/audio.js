@@ -4,8 +4,7 @@ class GameBoyAdvanceAudio {
 		if (window.AudioContext) {
 			var self = this;
 			this.context = new AudioContext();
-			this.bufferSize = 0;
-			this.bufferSize = 4096;
+			this.bufferSize = 2048;
 			this.maxSamples = this.bufferSize << 2;
 			this.buffers = [
 				new Float32Array(this.maxSamples),
@@ -744,9 +743,13 @@ class GameBoyAdvanceAudio {
 				left[i] = this.buffers[0][o | 0];
 				right[i] = this.buffers[1][o | 0];
 			}
+			var lastLeft = i > 0 ? left[i - 1] : 0;
+			var lastRight = i > 0 ? right[i - 1] : 0;
 			for (; i < this.bufferSize; ++i) {
-				left[i] = 0;
-				right[i] = 0;
+				lastLeft *= 0.95;
+				lastRight *= 0.95;
+				left[i] = lastLeft;
+				right[i] = lastRight;
 			}
 			this.outputPointer = o;
 			++this.totalSamples;

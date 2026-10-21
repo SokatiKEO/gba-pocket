@@ -1571,6 +1571,21 @@ class GameBoyAdvanceSoftwareRenderer {
 			xx++;
 		}
 	}
+	skipScanline(y) {
+		for (var i = 0; i < this.drawLayers.length; ++i) {
+			var layer = this.drawLayers[i];
+			if (layer.bg) {
+				layer.sx += layer.dmx;
+				layer.sy += layer.dmy;
+			}
+		}
+	}
+	skipFinishDraw(caller) {
+		this.bg[2].sx = this.bg[2].refx;
+		this.bg[2].sy = this.bg[2].refy;
+		this.bg[3].sx = this.bg[3].refx;
+		this.bg[3].sy = this.bg[3].refy;
+	}
 	startDraw() {
 		// Nothing to do
 	}

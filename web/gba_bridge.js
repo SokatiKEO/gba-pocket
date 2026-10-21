@@ -15,6 +15,7 @@
     isPaused: false,
     isLoaded: false,
     volume: 1.0,
+    isMuted: false,
     _drawHookAttached: false,
 
     _hookDrawCallback: function() {
@@ -23,7 +24,7 @@
       var originalDraw = this.gba.video.drawCallback;
       this.gba.video.drawCallback = function() {
         if (originalDraw) originalDraw();
-        self.frameCount++;
+        self.frameCount += (self.speedMultiplier || 1);
         var now = performance.now();
         if (now - self.lastFpsCheck >= 1000) {
           self.fps = Math.round((self.frameCount * 1000) / (now - self.lastFpsCheck));
@@ -138,6 +139,8 @@
       var self = this;
       try {
         this.gba.pause();
+        this.gba.reset();
+        this.setSpeed(1.0);
 
         var success = this.gba.setRom(buffer);
         if (success) {
@@ -147,7 +150,7 @@
           
           // Resume Audio Context
           if (self.gba.audio && self.gba.audio.context && self.gba.audio.context.state !== 'running') {
-            self.gba.audio.context.resume();
+            try { self.gba.audio.context.resume(); } catch(e) {}
           }
 
           self.gba.runStable();
@@ -170,16 +173,23 @@
     play: function() {
       if (!this.gba || !this.isLoaded) return;
       if (this.gba.audio && this.gba.audio.context && this.gba.audio.context.state !== 'running') {
-        this.gba.audio.context.resume();
+        try {
+          this.gba.audio.context.resume();
+        } catch(e) {}
       }
-      this.gba.runStable();
       this.isPaused = false;
+      this.gba.runStable();
     },
 
     pause: function() {
       if (!this.gba) return;
       this.gba.pause();
       this.isPaused = true;
+      if (this.gba.audio && this.gba.audio.context && this.gba.audio.context.state === 'running') {
+        try {
+          this.gba.audio.context.suspend();
+        } catch(e) {}
+      }
     },
 
     togglePause: function() {
@@ -195,9 +205,13 @@
       if (!this.gba) return;
       this.gba.pause();
       this.gba.reset();
-      if (this.isLoaded) {
-        this.gba.runStable();
-        this.isPaused = false;
+      this.isLoaded = false;
+      this.isPaused = true;
+      this.currentRomName = '';
+      if (this.gba.audio && this.gba.audio.context && this.gba.audio.context.state === 'running') {
+        try {
+          this.gba.audio.context.suspend();
+        } catch(e) {}
       }
     },
 
@@ -241,18 +255,30 @@
     },
 
     setMute: function(muted) {
+      this.isMuted = !!muted;
       if (this.gba && this.gba.audio) {
-        this.gba.audio.masterEnable = !muted;
+        if (this.speedMultiplier === 1) {
+          this.gba.audio.masterEnable = !this.isMuted;
+        } else {
+          this.gba.audio.masterEnable = false;
+        }
       }
     },
 
     setSpeed: function(multiplier) {
-      this.speedMultiplier = multiplier;
+      this.speedMultiplier = Math.max(1, Math.round(multiplier || 1));
       if (this.gba) {
-        // Default GBA throttle is ~16ms (60 FPS).
-        // 2x -> 8ms, 3x -> 5ms, 4x -> 4ms
-        var targetMs = Math.max(2, Math.round(16 / multiplier));
-        this.gba.throttle = targetMs;
+        this.gba.throttle = 16;
+        if (this.gba.audio) {
+          if (this.speedMultiplier > 1) {
+            this.gba.audio.masterEnable = false;
+          } else {
+            this.gba.audio.masterEnable = !this.isMuted;
+            if (this.gba.audio.buffers) {
+              this.gba.audio.outputPointer = this.gba.audio.samplePointer;
+            }
+          }
+        }
       }
     },
 
@@ -371,11 +397,14 @@
             } : null
           }
         };
+        var wasRunning = !this.isPaused && this.gba.isRunning;
+        this.gba.pause();
         this.gba.defrost(frost);
-        if (!this.isPaused) {
+        if (wasRunning || !this.isPaused) {
           if (this.gba.audio && this.gba.audio.context && this.gba.audio.context.state !== 'running') {
-            this.gba.audio.context.resume();
+            try { this.gba.audio.context.resume(); } catch(e) {}
           }
+          this.isPaused = false;
           this.gba.runStable();
         }
         console.log("[GBA Bridge] State successfully imported and resumed!");

@@ -62,6 +62,8 @@ class GameBoyAdvance {
 		this.queue = null;
 		this.reportFPS = null;
 		this.throttle = 16; // This is rough, but the 2/3ms difference gives us a good overhead
+		this.runGeneration = 0;
+		this.isRunning = false;
 
 		var self = this;
 		window.queueFrame = function (f) {
@@ -158,7 +160,9 @@ class GameBoyAdvance {
 		return !seen;
 	}
 	pause() {
+		this.runGeneration++;
 		this.paused = true;
+		this.isRunning = false;
 		this.audio.pause(true);
 		if (this.queue) {
 			clearTimeout(this.queue);
@@ -180,60 +184,52 @@ class GameBoyAdvance {
 		}
 	}
 	runStable() {
-		if (this.interval) {
-			return; // Already running
+		if (this.isRunning && !this.paused) {
+			return; // Already running cleanly
 		}
+		this.pause();
+		this.runGeneration++;
+		var myGeneration = this.runGeneration;
 		var self = this;
 		var timer = 0;
 		var frames = 0;
 		var runFunc;
 		var start = Date.now();
 		this.paused = false;
+		this.isRunning = true;
 		this.audio.pause(false);
 
-		if (this.reportFPS) {
-			runFunc = function () {
-				try {
-					timer += Date.now() - start;
-					if (self.paused) {
-						return;
-					} else {
-						queueFrame(runFunc);
-					}
-					start = Date.now();
+		runFunc = function () {
+			try {
+				if (self.paused || self.runGeneration !== myGeneration) {
+					return;
+				}
+				queueFrame(runFunc);
+				var speed = (window.GbaBridge && window.GbaBridge.speedMultiplier) ? window.GbaBridge.speedMultiplier : 1;
+				for (var s = 0; s < speed; ++s) {
+					var isLast = (s === speed - 1);
+					self.video.skipRendering = !isLast;
 					self.advanceFrame();
-					++frames;
-					if (frames == 60) {
+				}
+				self.video.skipRendering = false;
+				if (self.reportFPS) {
+					timer += Date.now() - start;
+					start = Date.now();
+					frames += speed;
+					if (frames >= 60) {
 						self.reportFPS((frames * 1000) / timer);
 						frames = 0;
 						timer = 0;
 					}
-				} catch (exception) {
-					self.ERROR(exception);
-					if (exception.stack) {
-						self.logStackTrace(exception.stack.split("\n"));
-					}
-					throw exception;
 				}
-			};
-		} else {
-			runFunc = function () {
-				try {
-					if (self.paused) {
-						return;
-					} else {
-						queueFrame(runFunc);
-					}
-					self.advanceFrame();
-				} catch (exception) {
-					self.ERROR(exception);
-					if (exception.stack) {
-						self.logStackTrace(exception.stack.split("\n"));
-					}
-					throw exception;
+			} catch (exception) {
+				self.ERROR(exception);
+				if (exception.stack) {
+					self.logStackTrace(exception.stack.split("\n"));
 				}
-			};
-		}
+				throw exception;
+			}
+		};
 		queueFrame(runFunc);
 	}
 	setSavedata(data) {

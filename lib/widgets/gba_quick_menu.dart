@@ -198,6 +198,36 @@ class GbaQuickMenuModal extends StatelessWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFF87171),
+                        side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.6), width: 1.2),
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      onPressed: () {
+                        controller.restartCurrentGame();
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Game restarted to Title Screen!'),
+                            duration: Duration(seconds: 1),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                      label: const Text(
+                        'RESTART TO TITLE SCREEN',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                      ),
+                    ),
+                  ),
 
                   const Divider(color: Colors.white12, height: 28),
 
@@ -303,7 +333,11 @@ class GbaQuickMenuModal extends StatelessWidget {
                                   minimumSize: const Size(54, 28),
                                 ),
                                 onPressed: () {
-                                  controller.loadSavedRom(entry);
+                                  if (isCurrent) {
+                                    controller.restartCurrentGame();
+                                  } else {
+                                    controller.loadSavedRom(entry);
+                                  }
                                   Navigator.pop(context);
                                 },
                                 child: Text(isCurrent ? 'RESTART' : 'PLAY', style: const TextStyle(fontSize: 10)),
@@ -373,7 +407,11 @@ class GbaQuickMenuModal extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                           ),
                           onPressed: () {
-                            controller.loadBuiltInRom(rom);
+                            if (isCurrent) {
+                              controller.restartCurrentGame();
+                            } else {
+                              controller.loadBuiltInRom(rom);
+                            }
                             Navigator.pop(context);
                           },
                           child: Text(isCurrent ? 'RESTART' : 'PLAY'),
