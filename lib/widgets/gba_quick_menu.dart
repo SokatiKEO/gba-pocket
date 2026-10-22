@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/gba_types.dart';
 import '../services/gba_controller.dart';
@@ -11,6 +12,7 @@ class GbaQuickMenuModal extends StatelessWidget {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.15),
       isScrollControlled: true,
       builder: (ctx) => GbaQuickMenuModal(controller: controller),
     );
@@ -18,22 +20,35 @@ class GbaQuickMenuModal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.sizeOf(context);
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFF16181F),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black87,
-                blurRadius: 20,
-                offset: Offset(0, -4),
+        return ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: mediaQuery.height * 0.85,
               ),
-            ],
-          ),
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+              decoration: BoxDecoration(
+                color: const Color(0x600F172A),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                border: Border(
+                  top: BorderSide(color: Colors.white.withValues(alpha: 0.22), width: 1.5),
+                  left: BorderSide(color: Colors.white.withValues(alpha: 0.10), width: 1),
+                  right: BorderSide(color: Colors.white.withValues(alpha: 0.10), width: 1),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 24,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
           child: SafeArea(
             top: false,
             child: SingleChildScrollView(
@@ -572,9 +587,11 @@ class GbaQuickMenuModal extends StatelessWidget {
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
+  },
+);
   }
 
   Widget _buildSpeedChip(double speedVal, String label) {

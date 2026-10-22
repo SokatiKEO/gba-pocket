@@ -5,7 +5,7 @@ class GameBoyAdvanceAudio {
 			var self = this;
 			this.context = new AudioContext();
 			this.bufferSize = 2048;
-			this.maxSamples = this.bufferSize << 2;
+			this.maxSamples = this.bufferSize << 4;
 			this.buffers = [
 				new Float32Array(this.maxSamples),
 				new Float32Array(this.maxSamples)
@@ -158,15 +158,26 @@ class GameBoyAdvanceAudio {
 		this.nextSample = frost.nextSample;
 	}
 	pause(paused) {
-		if (this.context) {
+		if (this.context && this.jsAudio) {
 			if (paused) {
 				try {
-					this.jsAudio.disconnect(this.context.destination);
-				} catch (e) {
-					// Sigh
+					this.jsAudio.disconnect();
+				} catch (e) {}
+			} else {
+				try {
+					this.jsAudio.disconnect();
+				} catch (e) {}
+				try {
+					this.jsAudio.connect(this.context.destination);
+				} catch (e) {}
+				if (this.context.state === 'suspended') {
+					try {
+						this.context.resume();
+					} catch (e) {}
 				}
-			} else if (this.enabled) {
-				this.jsAudio.connect(this.context.destination);
+				if (this.buffers) {
+					this.outputPointer = this.samplePointer;
+				}
 			}
 		}
 	}
@@ -729,35 +740,49 @@ class GameBoyAdvanceAudio {
 	audioProcess(audioProcessingEvent) {
 		var left = audioProcessingEvent.outputBuffer.getChannelData(0);
 		var right = audioProcessingEvent.outputBuffer.getChannelData(1);
-		if (this.masterEnable) {
-			var i;
-			var o = this.outputPointer;
-			for (i = 0; i < this.bufferSize; ++i, o += this.resampleRatio) {
-				if (o >= this.maxSamples) {
-					o -= this.maxSamples;
-				}
-				if ((o | 0) == this.samplePointer) {
-					++this.backup;
-					break;
-				}
-				left[i] = this.buffers[0][o | 0];
-				right[i] = this.buffers[1][o | 0];
+		if (!this.masterEnable) {
+			for (var k = 0; k < this.bufferSize; ++k) {
+				left[k] = 0;
+				right[k] = 0;
 			}
-			var lastLeft = i > 0 ? left[i - 1] : 0;
-			var lastRight = i > 0 ? right[i - 1] : 0;
-			for (; i < this.bufferSize; ++i) {
-				lastLeft *= 0.95;
-				lastRight *= 0.95;
-				left[i] = lastLeft;
-				right[i] = lastRight;
-			}
-			this.outputPointer = o;
-			++this.totalSamples;
-		} else {
-			for (i = 0; i < this.bufferSize; ++i) {
-				left[i] = 0;
-				right[i] = 0;
+			return;
+		}
+
+		var mask = this.sampleMask;
+		var maxS = this.maxSamples;
+		var o = this.outputPointer;
+		var sp = this.samplePointer;
+		var ratio = this.resampleRatio || 1;
+
+		var available = (sp - (o | 0) + maxS) & mask;
+		var maxLag = Math.min(maxS >> 1, Math.ceil(this.bufferSize * ratio * 2.5));
+		if (available > maxLag) {
+			o = (sp - maxLag + maxS) & mask;
+			available = maxLag;
+		}
+
+		var i = 0;
+		var stepLimit = Math.min(this.bufferSize, Math.floor(available / ratio));
+		for (; i < stepLimit; ++i) {
+			var idx = (o | 0) & mask;
+			left[i] = this.buffers[0][idx];
+			right[i] = this.buffers[1][idx];
+			o += ratio;
+			if (o >= maxS) {
+				o -= maxS;
 			}
 		}
+
+		var lastL = i > 0 ? left[i - 1] : 0;
+		var lastR = i > 0 ? right[i - 1] : 0;
+		for (; i < this.bufferSize; ++i) {
+			lastL *= 0.92;
+			lastR *= 0.92;
+			left[i] = lastL;
+			right[i] = lastR;
+		}
+
+		this.outputPointer = o;
+		++this.totalSamples;
 	}
 }

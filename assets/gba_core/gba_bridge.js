@@ -172,12 +172,34 @@
 
     play: function() {
       if (!this.gba || !this.isLoaded) return;
-      if (this.gba.audio && this.gba.audio.context && this.gba.audio.context.state !== 'running') {
-        try {
-          this.gba.audio.context.resume();
-        } catch(e) {}
-      }
       this.isPaused = false;
+      if (this.gba.audio) {
+        this.gba.audio.masterEnable = !this.isMuted;
+        if (this.gba.audio.context) {
+          var baseRatio = this.gba.audio.sampleRate / this.gba.audio.context.sampleRate;
+          this.gba.audio.resampleRatio = baseRatio * this.speedMultiplier;
+          if (this.gba.audio.context.state !== 'running') {
+            try {
+              this.gba.audio.context.resume();
+            } catch(e) {}
+          }
+          if (this.gba.audio.jsAudio) {
+            try {
+              this.gba.audio.jsAudio.disconnect();
+            } catch(e) {}
+            try {
+              this.gba.audio.jsAudio.connect(this.gba.audio.context.destination);
+            } catch(e) {}
+          }
+        }
+        if (this.gba.audio.buffers) {
+          var maxS = this.gba.audio.maxSamples || 8192;
+          var avail = (this.gba.audio.samplePointer - (this.gba.audio.outputPointer | 0) + maxS) & this.gba.audio.sampleMask;
+          if (avail > (maxS >> 1)) {
+            this.gba.audio.outputPointer = (this.gba.audio.samplePointer - 1024 + maxS) & this.gba.audio.sampleMask;
+          }
+        }
+      }
       this.gba.runStable();
     },
 
@@ -257,11 +279,7 @@
     setMute: function(muted) {
       this.isMuted = !!muted;
       if (this.gba && this.gba.audio) {
-        if (this.speedMultiplier === 1) {
-          this.gba.audio.masterEnable = !this.isMuted;
-        } else {
-          this.gba.audio.masterEnable = false;
-        }
+        this.gba.audio.masterEnable = !this.isMuted;
       }
     },
 
@@ -270,13 +288,10 @@
       if (this.gba) {
         this.gba.throttle = 16;
         if (this.gba.audio) {
-          if (this.speedMultiplier > 1) {
-            this.gba.audio.masterEnable = false;
-          } else {
-            this.gba.audio.masterEnable = !this.isMuted;
-            if (this.gba.audio.buffers) {
-              this.gba.audio.outputPointer = this.gba.audio.samplePointer;
-            }
+          this.gba.audio.masterEnable = !this.isMuted;
+          if (this.gba.audio.context) {
+            var baseRatio = this.gba.audio.sampleRate / this.gba.audio.context.sampleRate;
+            this.gba.audio.resampleRatio = baseRatio * this.speedMultiplier;
           }
         }
       }

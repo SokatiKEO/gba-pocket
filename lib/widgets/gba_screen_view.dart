@@ -20,7 +20,7 @@ class GbaScreenView extends StatelessWidget {
     if (isFullscreen) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: AspectRatio(
             aspectRatio: 3 / 2,
             child: Container(

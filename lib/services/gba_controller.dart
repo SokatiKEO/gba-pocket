@@ -525,6 +525,8 @@ class GbaController extends ChangeNotifier {
 
   void togglePlayPause() {
     if (_isPaused) {
+      _bridge.setVolume(_isMuted ? 0.0 : _volume);
+      _bridge.setMute(_isMuted);
       _bridge.play();
       _isPaused = false;
     } else {

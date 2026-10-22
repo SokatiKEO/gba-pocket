@@ -294,48 +294,50 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
       return Container(
         color: Colors.black,
         child: SafeArea(
-          child: Stack(
-            children: [
-              // Maximized 3:2 Game Viewport centered across the display
-              Positioned.fill(
-                child: Center(
-                  child: GbaScreenView(
-                    key: _screenKey,
-                    controller: widget.controller,
-                    isFullscreen: true,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Stack(
+              children: [
+                // Maximized 3:2 Game Viewport centered across the display
+                Positioned.fill(
+                  child: Center(
+                    child: GbaScreenView(
+                      key: _screenKey,
+                      controller: widget.controller,
+                      isFullscreen: true,
+                    ),
                   ),
                 ),
-              ),
 
-              // Semi-transparent controls in the exact same coordinates
-              Positioned.fill(
-                child: Row(
-                  children: [
-                    // Left Column Controls (near left edge, transparent)
-                    Expanded(
-                      flex: 4,
-                      child: Opacity(
-                        opacity: 0.40,
-                        child: _buildLeftLandscapeControls(skin, isFullscreen: true),
+                // Semi-transparent controls in the exact same coordinates
+                Positioned.fill(
+                  child: Row(
+                    children: [
+                      // Left Column Controls (near left edge, transparent)
+                      Expanded(
+                        flex: 4,
+                        child: Opacity(
+                          opacity: 0.40,
+                          child: _buildLeftLandscapeControls(skin, isFullscreen: true),
+                        ),
                       ),
-                    ),
 
-                    // Center Spacer with floating toolbar at top
-                    Expanded(
-                      flex: 6,
-                      child: Column(
-                        children: [
-                          Align(
-                            alignment: Alignment.topCenter,
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: _buildLandscapeToolbar(context, isFullscreen: true),
+                      // Center Spacer with floating toolbar at top
+                      Expanded(
+                        flex: 6,
+                        child: Column(
+                          children: [
+                            Align(
+                              alignment: Alignment.topCenter,
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: _buildLandscapeToolbar(context, isFullscreen: true),
+                              ),
                             ),
-                          ),
-                          const Spacer(),
-                        ],
+                            const Spacer(),
+                          ],
+                        ),
                       ),
-                    ),
 
                     // Right Column Controls (near right edge, transparent)
                     Expanded(
@@ -351,8 +353,9 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
             ],
           ),
         ),
-      );
-    }
+      ),
+    );
+  }
 
     // Standard Handheld Landscape Layout
     return Row(
@@ -404,7 +407,7 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(left: 10, top: 8, right: 8),
+            padding: const EdgeInsets.only(left: 12, top: 10, right: 8),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -423,7 +426,7 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
           ),
           const Spacer(),
           Padding(
-            padding: const EdgeInsets.only(left: 12, bottom: 10),
+            padding: const EdgeInsets.only(left: 14, bottom: 14),
             child: GbaDpad(
               controller: widget.controller,
               size: 176,
@@ -474,7 +477,7 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Padding(
-            padding: const EdgeInsets.only(right: 10, top: 8, left: 8),
+            padding: const EdgeInsets.only(right: 12, top: 10, left: 8),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -493,7 +496,7 @@ class _EmulatorScreenState extends State<EmulatorScreen> {
           ),
           const Spacer(),
           Padding(
-            padding: const EdgeInsets.only(right: 12, bottom: 10),
+            padding: const EdgeInsets.only(right: 14, bottom: 14),
             child: GbaActionButtons(
               controller: widget.controller,
               buttonSize: 58,
