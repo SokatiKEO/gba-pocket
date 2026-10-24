@@ -537,6 +537,22 @@
           tx.onerror = function(e) { reject(e.target.error); };
         });
       });
+    },
+
+    getAllRomKeys: function() {
+      return this._getDb().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          var tx = db.transaction('roms', 'readonly');
+          var store = tx.objectStore('roms');
+          var req = store.getAllKeys();
+          req.onsuccess = function(e) {
+            resolve(e.target.result || []);
+          };
+          req.onerror = function(e) {
+            reject(e.target.error);
+          };
+        });
+      });
     }
   };
 })();

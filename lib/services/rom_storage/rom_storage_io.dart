@@ -1,22 +1,72 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../models/gba_types.dart';
 import 'rom_storage_interface.dart';
 
 class GbaRomStorageImpl implements GbaRomStorage {
   Directory? _romsDir;
+  Directory? _statesDir;
+
+  Future<List<Directory>> _getAllCandidateDirs() async {
+    final dirs = <Directory>[];
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      dirs.add(Directory('${docs.path}/gba_custom_roms'));
+    } catch (_) {}
+    try {
+      final support = await getApplicationSupportDirectory();
+      dirs.add(Directory('${support.path}/gba_custom_roms'));
+    } catch (_) {}
+    return dirs;
+  }
 
   Future<Directory> _getDir() async {
-    if (_romsDir != null) return _romsDir!;
-    final docs = await getApplicationDocumentsDirectory();
-    final dir = Directory('${docs.path}/gba_custom_roms');
-    if (!dir.existsSync()) {
-      await dir.create(recursive: true);
+    if (_romsDir != null && _romsDir!.existsSync()) return _romsDir!;
+    Directory? chosen;
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      chosen = Directory('${docs.path}/gba_custom_roms');
+    } catch (_) {
+      try {
+        final support = await getApplicationSupportDirectory();
+        chosen = Directory('${support.path}/gba_custom_roms');
+      } catch (_) {}
     }
-    _romsDir = dir;
-    return dir;
+    chosen ??= Directory('gba_custom_roms');
+    if (!chosen.existsSync()) {
+      await chosen.create(recursive: true);
+    }
+    _romsDir = chosen;
+    return chosen;
+  }
+
+  Future<void> _atomicWriteString(File targetFile, String content) async {
+    final tempFile = File('${targetFile.path}.tmp_${DateTime.now().microsecondsSinceEpoch}');
+    try {
+      await tempFile.writeAsString(content, flush: true);
+      if (await targetFile.exists()) {
+        final backupFile = File('${targetFile.path}.bak');
+        try {
+          if (await backupFile.exists()) {
+            await backupFile.delete();
+          }
+          await targetFile.copy(backupFile.path);
+        } catch (_) {}
+      }
+      await tempFile.rename(targetFile.path);
+    } catch (e) {
+      debugPrint('Atomic write rename fallback: $e');
+      try {
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      } catch (_) {}
+      try {
+        await targetFile.writeAsString(content, flush: true);
+      } catch (_) {}
+    }
   }
 
   @override
@@ -36,21 +86,33 @@ class GbaRomStorageImpl implements GbaRomStorage {
   @override
   Future<Uint8List?> loadRomBytes(String id) async {
     try {
-      final dir = await _getDir();
-      final file = File('${dir.path}/$id.gba');
-      if (await file.exists()) {
-        return await file.readAsBytes();
-      }
-      if (await dir.exists()) {
-        final entities = await dir.list().toList();
-        for (final e in entities) {
-          if (e is File) {
-            final name = e.uri.pathSegments.last;
-            if (name == '$id.gba' || name.startsWith(id)) {
-              return await e.readAsBytes();
+      final candidateDirs = await _getAllCandidateDirs();
+      final cleanId = id.replaceAll(RegExp(r'\.(gba|agb|bin)$', caseSensitive: false), '');
+
+      for (final dir in candidateDirs) {
+        if (!await dir.exists()) continue;
+
+        final exact = File('${dir.path}/$cleanId.gba');
+        if (await exact.exists()) {
+          return await exact.readAsBytes();
+        }
+
+        final direct = File('${dir.path}/$id');
+        if (await direct.exists()) {
+          return await direct.readAsBytes();
+        }
+
+        try {
+          final entities = await dir.list().toList();
+          for (final e in entities) {
+            if (e is File) {
+              final name = e.path.split(RegExp(r'[/\\]')).last;
+              if (name == '$cleanId.gba' || name == '$id.gba' || name.startsWith(cleanId)) {
+                return await e.readAsBytes();
+              }
             }
           }
-        }
+        } catch (_) {}
       }
     } catch (_) {}
     return null;
@@ -59,25 +121,40 @@ class GbaRomStorageImpl implements GbaRomStorage {
   @override
   Future<void> deleteRom(String id) async {
     try {
-      final dir = await _getDir();
-      final file = File('${dir.path}/$id.gba');
-      if (await file.exists()) {
-        await file.delete();
+      final candidateDirs = await _getAllCandidateDirs();
+      final cleanId = id.replaceAll(RegExp(r'\.(gba|agb|bin)$', caseSensitive: false), '');
+      for (final dir in candidateDirs) {
+        if (!await dir.exists()) continue;
+        final file = File('${dir.path}/$cleanId.gba');
+        if (await file.exists()) {
+          await file.delete();
+        }
+        final direct = File('${dir.path}/$id');
+        if (await direct.exists()) {
+          await direct.delete();
+        }
       }
     } catch (_) {}
   }
 
-  Directory? _statesDir;
-
   Future<Directory> _getStatesDir() async {
-    if (_statesDir != null) return _statesDir!;
-    final docs = await getApplicationDocumentsDirectory();
-    final dir = Directory('${docs.path}/gba_states');
-    if (!dir.existsSync()) {
-      await dir.create(recursive: true);
+    if (_statesDir != null && _statesDir!.existsSync()) return _statesDir!;
+    Directory? chosen;
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      chosen = Directory('${docs.path}/gba_states');
+    } catch (_) {
+      try {
+        final support = await getApplicationSupportDirectory();
+        chosen = Directory('${support.path}/gba_states');
+      } catch (_) {}
     }
-    _statesDir = dir;
-    return dir;
+    chosen ??= Directory('gba_states');
+    if (!chosen.existsSync()) {
+      await chosen.create(recursive: true);
+    }
+    _statesDir = chosen;
+    return chosen;
   }
 
   @override
@@ -85,7 +162,7 @@ class GbaRomStorageImpl implements GbaRomStorage {
     try {
       final dir = await _getStatesDir();
       final file = File('${dir.path}/${romId}_slot_$slot.json');
-      await file.writeAsString(stateData, flush: true);
+      await _atomicWriteString(file, stateData);
     } catch (_) {}
   }
 
@@ -96,6 +173,10 @@ class GbaRomStorageImpl implements GbaRomStorage {
       final file = File('${dir.path}/${romId}_slot_$slot.json');
       if (await file.exists()) {
         return await file.readAsString();
+      }
+      final bakFile = File('${dir.path}/${romId}_slot_$slot.json.bak');
+      if (await bakFile.exists()) {
+        return await bakFile.readAsString();
       }
     } catch (_) {}
     return null;
@@ -109,6 +190,10 @@ class GbaRomStorageImpl implements GbaRomStorage {
       if (await file.exists()) {
         await file.delete();
       }
+      final bakFile = File('${dir.path}/${romId}_slot_$slot.json.bak');
+      if (await bakFile.exists()) {
+        await bakFile.delete();
+      }
     } catch (_) {}
   }
 
@@ -118,52 +203,90 @@ class GbaRomStorageImpl implements GbaRomStorage {
       final dir = await _getDir();
       final file = File('${dir.path}/library.json');
       final jsonStr = jsonEncode(entries.map((e) => e.toJson()).toList());
-      await file.writeAsString(jsonStr, flush: true);
+      await _atomicWriteString(file, jsonStr);
     } catch (_) {}
   }
 
   @override
   Future<List<SavedRomEntry>> loadLibrary() async {
+    final Map<String, SavedRomEntry> romMap = {};
     try {
-      final dir = await _getDir();
-      final file = File('${dir.path}/library.json');
-      final Map<String, SavedRomEntry> romMap = {};
+      final candidateDirs = await _getAllCandidateDirs();
 
-      if (await file.exists()) {
-        try {
-          final content = await file.readAsString();
-          final list = jsonDecode(content) as List<dynamic>;
-          for (final item in list) {
+      for (final dir in candidateDirs) {
+        if (!await dir.exists()) continue;
+
+        // 1. Try reading library.json
+        final file = File('${dir.path}/library.json');
+        if (await file.exists()) {
+          try {
+            final content = await file.readAsString();
+            if (content.trim().isNotEmpty) {
+              final list = jsonDecode(content) as List<dynamic>;
+              for (final item in list) {
+                try {
+                  final entry = SavedRomEntry.fromJson(item as Map<String, dynamic>);
+                  romMap[entry.id] = entry;
+                } catch (_) {}
+              }
+            }
+          } catch (_) {
+            // Backup file check
             try {
-              final entry = SavedRomEntry.fromJson(item as Map<String, dynamic>);
-              romMap[entry.id] = entry;
+              final bakFile = File('${dir.path}/library.json.bak');
+              if (await bakFile.exists()) {
+                final content = await bakFile.readAsString();
+                final list = jsonDecode(content) as List<dynamic>;
+                for (final item in list) {
+                  try {
+                    final entry = SavedRomEntry.fromJson(item as Map<String, dynamic>);
+                    romMap[entry.id] = entry;
+                  } catch (_) {}
+                }
+              }
             } catch (_) {}
           }
-        } catch (_) {}
-      }
+        }
 
-      // Always scan directory for all saved ROM binaries to ensure persistence
-      if (await dir.exists()) {
-        final entities = await dir.list().toList();
-        for (final entity in entities) {
-          if (entity is File) {
-            final pathLower = entity.path.toLowerCase();
-            if (pathLower.endsWith('.gba') || pathLower.endsWith('.agb') || pathLower.endsWith('.bin')) {
-              final fileName = entity.uri.pathSegments.last;
-              final id = fileName.replaceAll(RegExp(r'\.(gba|agb|bin)$', caseSensitive: false), '');
-              if (!romMap.containsKey(id)) {
-                final cleanTitle = id.replaceAll(RegExp(r'^\d+_'), '').replaceAll('_', ' ');
-                romMap[id] = SavedRomEntry(
-                  id: id,
-                  title: cleanTitle.isEmpty ? 'Custom ROM' : cleanTitle,
-                  fileName: fileName,
-                  sizeBytes: entity.lengthSync(),
-                  addedAt: DateTime.now(),
-                );
+        // 2. Scan directory for any saved ROM binaries to ensure persistence
+        try {
+          final entities = await dir.list().toList();
+          for (final entity in entities) {
+            if (entity is File) {
+              final pathLower = entity.path.toLowerCase();
+              if (pathLower.endsWith('.gba') || pathLower.endsWith('.agb') || pathLower.endsWith('.bin')) {
+                final fileName = entity.path.split(RegExp(r'[/\\]')).last;
+                final id = fileName.replaceAll(RegExp(r'\.(gba|agb|bin)$', caseSensitive: false), '');
+                if (!romMap.containsKey(id)) {
+                  int size = 0;
+                  try {
+                    size = await entity.length();
+                  } catch (_) {}
+
+                  String cleanTitle = id;
+                  if (cleanTitle.toLowerCase().startsWith('rom_')) {
+                    cleanTitle = cleanTitle.substring(4);
+                  }
+                  cleanTitle = cleanTitle.replaceAll(RegExp(r'^\d+_'), '').replaceAll('_', ' ').trim();
+                  if (cleanTitle.isNotEmpty) {
+                    cleanTitle = cleanTitle.split(' ').map((w) {
+                      if (w.isEmpty) return '';
+                      return '${w[0].toUpperCase()}${w.substring(1)}';
+                    }).join(' ');
+                  }
+
+                  romMap[id] = SavedRomEntry(
+                    id: id,
+                    title: cleanTitle.isEmpty ? 'Custom ROM' : cleanTitle,
+                    fileName: fileName,
+                    sizeBytes: size,
+                    addedAt: DateTime.now(),
+                  );
+                }
               }
             }
           }
-        }
+        } catch (_) {}
       }
 
       final result = romMap.values.toList();
@@ -172,7 +295,7 @@ class GbaRomStorageImpl implements GbaRomStorage {
       }
       return result;
     } catch (_) {}
-    return [];
+    return romMap.values.toList();
   }
 
   @override
@@ -180,18 +303,23 @@ class GbaRomStorageImpl implements GbaRomStorage {
     try {
       final dir = await _getDir();
       final file = File('${dir.path}/active_game.json');
-      await file.writeAsString(jsonEncode(data), flush: true);
+      await _atomicWriteString(file, jsonEncode(data));
     } catch (_) {}
   }
 
   @override
   Future<Map<String, dynamic>?> loadActiveGameMetadata() async {
     try {
-      final dir = await _getDir();
-      final file = File('${dir.path}/active_game.json');
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        return jsonDecode(content) as Map<String, dynamic>;
+      final candidateDirs = await _getAllCandidateDirs();
+      for (final dir in candidateDirs) {
+        if (!await dir.exists()) continue;
+        final file = File('${dir.path}/active_game.json');
+        if (await file.exists()) {
+          try {
+            final content = await file.readAsString();
+            return jsonDecode(content) as Map<String, dynamic>;
+          } catch (_) {}
+        }
       }
     } catch (_) {}
     return null;

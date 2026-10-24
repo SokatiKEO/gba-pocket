@@ -91,14 +91,56 @@ class GbaRomStorageImpl implements GbaRomStorage {
 
   @override
   Future<List<SavedRomEntry>> loadLibrary() async {
+    final Map<String, SavedRomEntry> romMap = {};
     try {
       final str = web.window.localStorage.getItem('gba_library_backup');
       if (str != null && str.isNotEmpty) {
         final list = jsonDecode(str) as List<dynamic>;
-        return list.map((item) => SavedRomEntry.fromJson(item as Map<String, dynamic>)).toList();
+        for (final item in list) {
+          try {
+            final entry = SavedRomEntry.fromJson(item as Map<String, dynamic>);
+            romMap[entry.id] = entry;
+          } catch (_) {}
+        }
       }
     } catch (_) {}
-    return [];
+
+    // Check IndexedDB keys as fallback to ensure ROMs are never lost
+    final db = _db;
+    if (db != null) {
+      try {
+        final promise = db.callMethod('getAllRomKeys'.toJS) as JSPromise;
+        final result = await promise.toDart;
+        if (result != null && result.isA<JSArray<JSString>>()) {
+          final jsArr = result as JSArray<JSString>;
+          final length = jsArr.length;
+          for (int i = 0; i < length; i++) {
+            final keyObj = jsArr[i];
+            final id = keyObj.toDart;
+            if (!romMap.containsKey(id)) {
+              String title = id.startsWith('rom_') ? id.substring(4) : id;
+              title = title.replaceAll('_', ' ').trim();
+              if (title.isNotEmpty) {
+                title = title.split(' ').map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '').join(' ');
+              }
+              romMap[id] = SavedRomEntry(
+                id: id,
+                title: title.isEmpty ? 'Custom ROM' : title,
+                fileName: '$title.gba',
+                sizeBytes: 0,
+                addedAt: DateTime.now(),
+              );
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    final result = romMap.values.toList();
+    if (result.isNotEmpty) {
+      await saveLibrary(result);
+    }
+    return result;
   }
 
   @override

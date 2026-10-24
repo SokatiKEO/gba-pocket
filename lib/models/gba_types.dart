@@ -234,14 +234,29 @@ class SavedRomEntry {
     'addedAt': addedAt.toIso8601String(),
   };
 
-  factory SavedRomEntry.fromJson(Map<String, dynamic> json) => SavedRomEntry(
-    id: json['id'] as String,
-    title: json['title'] as String,
-    fileName: json['fileName'] as String? ?? '${json['title']}.gba',
-    sizeBytes: json['sizeBytes'] as int? ?? 0,
-    addedAt: json['addedAt'] != null
-        ? DateTime.tryParse(json['addedAt'] as String) ?? DateTime.now()
-        : DateTime.now(),
-  );
+  factory SavedRomEntry.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id']?.toString() ?? '';
+    final rawTitle = json['title']?.toString() ?? 'Custom ROM';
+    final rawFileName = json['fileName']?.toString() ?? '$rawTitle.gba';
+    final rawSize = (json['sizeBytes'] as num?)?.toInt() ?? 0;
+
+    DateTime parsedDate;
+    final rawAddedAt = json['addedAt'];
+    if (rawAddedAt is String) {
+      parsedDate = DateTime.tryParse(rawAddedAt) ?? DateTime.now();
+    } else if (rawAddedAt is num) {
+      parsedDate = DateTime.fromMillisecondsSinceEpoch(rawAddedAt.toInt());
+    } else {
+      parsedDate = DateTime.now();
+    }
+
+    return SavedRomEntry(
+      id: rawId.isEmpty ? 'rom_${DateTime.now().millisecondsSinceEpoch}' : rawId,
+      title: rawTitle,
+      fileName: rawFileName,
+      sizeBytes: rawSize,
+      addedAt: parsedDate,
+    );
+  }
 }
 

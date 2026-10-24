@@ -37,6 +37,9 @@ class GbaController extends ChangeNotifier {
   AppLifecycleListener? _lifecycleListener;
   bool _wasPausedBeforeBackground = false;
   bool _stateRestoredForCurrentLoad = false;
+  bool _isBackgrounded = false;
+  bool _explicitlyClearedSavedRoms = false;
+  Future<void>? _activeSaveOperation;
   final Completer<void> _preferencesLoadedCompleter = Completer<void>();
 
   // Getters
@@ -100,6 +103,9 @@ class GbaController extends ChangeNotifier {
   }
 
   void _handleAppBackgrounded() {
+    if (_isBackgrounded) return;
+    _isBackgrounded = true;
+
     if (_isRunning) {
       if (_activeRomId != null) {
         _bridge.saveState(0, romId: _activeRomId);
@@ -110,10 +116,13 @@ class GbaController extends ChangeNotifier {
       _isPaused = true;
       _savePreferences();
       notifyListeners();
+    } else {
+      _savePreferences();
     }
   }
 
   void _handleAppResumed() {
+    _isBackgrounded = false;
     if (_isRunning && !_wasPausedBeforeBackground) {
       _bridge.setMute(_isMuted);
       _bridge.play();
@@ -156,23 +165,34 @@ class GbaController extends ChangeNotifier {
       _selectedSaveSlot = prefs.getInt('gba_selected_save_slot') ?? 1;
 
       // 1. Always load disk library first (physical persistent source of truth)
-      final diskRoms = await _romStorage.loadLibrary();
+      List<SavedRomEntry> diskRoms = [];
+      try {
+        diskRoms = await _romStorage.loadLibrary();
+      } catch (e) {
+        debugPrint('Error loading disk library: $e');
+      }
       final Map<String, SavedRomEntry> romMap = {for (final r in diskRoms) r.id: r};
 
       // 2. Also merge any entries from SharedPreferences
-      final romsJsonList = prefs.getStringList('gba_saved_roms_list');
-      if (romsJsonList != null && romsJsonList.isNotEmpty) {
-        for (final str in romsJsonList) {
-          try {
-            final entry = SavedRomEntry.fromJson(jsonDecode(str) as Map<String, dynamic>);
-            romMap.putIfAbsent(entry.id, () => entry);
-          } catch (_) {}
+      try {
+        final romsJsonList = prefs.getStringList('gba_saved_roms_list');
+        if (romsJsonList != null && romsJsonList.isNotEmpty) {
+          for (final str in romsJsonList) {
+            try {
+              final entry = SavedRomEntry.fromJson(jsonDecode(str) as Map<String, dynamic>);
+              romMap.putIfAbsent(entry.id, () => entry);
+            } catch (_) {}
+          }
         }
+      } catch (e) {
+        debugPrint('Error loading prefs ROMs: $e');
       }
+
       _savedRoms = romMap.values.toList();
       if (_savedRoms.isNotEmpty) {
         final list = _savedRoms.map((r) => jsonEncode(r.toJson())).toList();
         await prefs.setStringList('gba_saved_roms_list', list);
+        await _romStorage.saveLibrary(_savedRoms);
       }
 
       // 3. Load active ROM
@@ -195,7 +215,8 @@ class GbaController extends ChangeNotifier {
       }
 
       notifyListeners();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Error in _loadPreferences: $e');
     } finally {
       if (!_preferencesLoadedCompleter.isCompleted) {
         _preferencesLoadedCompleter.complete();
@@ -204,6 +225,17 @@ class GbaController extends ChangeNotifier {
   }
 
   Future<void> _savePreferences() async {
+    if (_activeSaveOperation != null) {
+      try {
+        await _activeSaveOperation;
+      } catch (_) {}
+    }
+    final saveFuture = _performSavePreferences();
+    _activeSaveOperation = saveFuture;
+    await saveFuture;
+  }
+
+  Future<void> _performSavePreferences() async {
     // Guard against overwriting storage before initial preferences have finished loading
     if (!_preferencesLoadedCompleter.isCompleted) {
       await _preferencesLoadedCompleter.future;
@@ -217,8 +249,30 @@ class GbaController extends ChangeNotifier {
       await prefs.setBool('gba_landscape_fullscreen', _landscapeFullscreen);
       await prefs.setInt('gba_selected_save_slot', _selectedSaveSlot);
 
-      final romsJsonList = _savedRoms.map((r) => jsonEncode(r.toJson())).toList();
-      await prefs.setStringList('gba_saved_roms_list', romsJsonList);
+      if (_savedRoms.isNotEmpty) {
+        final romsJsonList = _savedRoms.map((r) => jsonEncode(r.toJson())).toList();
+        await prefs.setStringList('gba_saved_roms_list', romsJsonList);
+        await _romStorage.saveLibrary(_savedRoms);
+      } else if (_explicitlyClearedSavedRoms) {
+        await prefs.remove('gba_saved_roms_list');
+        await _romStorage.saveLibrary([]);
+      } else {
+        // Protect saved ROMs: if memory list was somehow empty and not explicitly cleared by user,
+        // recover from SharedPreferences rather than overwriting with []
+        final existingList = prefs.getStringList('gba_saved_roms_list');
+        if (existingList != null && existingList.isNotEmpty) {
+          final recovered = <SavedRomEntry>[];
+          for (final str in existingList) {
+            try {
+              recovered.add(SavedRomEntry.fromJson(jsonDecode(str) as Map<String, dynamic>));
+            } catch (_) {}
+          }
+          if (recovered.isNotEmpty) {
+            _savedRoms = recovered;
+            notifyListeners();
+          }
+        }
+      }
 
       if (_activeRomId != null) {
         await prefs.setString('gba_active_rom_id', _activeRomId!);
@@ -236,10 +290,6 @@ class GbaController extends ChangeNotifier {
         await prefs.remove('gba_active_rom_title');
       }
 
-      // Also persist library and active game to disk backup
-      if (_savedRoms.isNotEmpty) {
-        await _romStorage.saveLibrary(_savedRoms);
-      }
       if (_activeRomId != null && _activeRomType != null) {
         await _romStorage.saveActiveGameMetadata({
           'id': _activeRomId,
@@ -284,6 +334,25 @@ class GbaController extends ChangeNotifier {
         await loadSavedRom(matching.first);
       } else if (_savedRoms.isNotEmpty) {
         await loadSavedRom(_savedRoms.first);
+      } else if (_activeRomId != null) {
+        // Fallback: check if binary exists directly in storage
+        final bytes = await _romStorage.loadRomBytes(_activeRomId!);
+        if (bytes != null && bytes.isNotEmpty) {
+          final recoveredEntry = SavedRomEntry(
+            id: _activeRomId!,
+            title: _activeRomTitle ?? 'Custom ROM',
+            fileName: '${_activeRomTitle ?? 'Custom ROM'}.gba',
+            sizeBytes: bytes.length,
+            addedAt: DateTime.now(),
+          );
+          _savedRoms = [recoveredEntry];
+          await _romStorage.saveLibrary(_savedRoms);
+          await _savePreferences();
+          await loadSavedRom(recoveredEntry);
+        } else {
+          _isRestoring = false;
+          notifyListeners();
+        }
       } else {
         _isRestoring = false;
         notifyListeners();
@@ -378,12 +447,17 @@ class GbaController extends ChangeNotifier {
         if (bytes.isEmpty) return false;
 
         final cleanTitle = file.name.replaceAll(RegExp(r'\.(gba|bin|agb)$', caseSensitive: false), '');
-        final cleanId = cleanTitle.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
-        final id = 'rom_$cleanId';
+        String cleanId = cleanTitle.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+        if (cleanId.isEmpty) {
+          cleanId = 'rom_${DateTime.now().millisecondsSinceEpoch}';
+        } else {
+          cleanId = 'rom_$cleanId';
+        }
+        final id = cleanId;
 
         final entry = SavedRomEntry(
           id: id,
-          title: cleanTitle,
+          title: cleanTitle.isEmpty ? 'Custom ROM' : cleanTitle,
           fileName: file.name,
           sizeBytes: bytes.length,
           addedAt: DateTime.now(),
@@ -393,8 +467,9 @@ class GbaController extends ChangeNotifier {
         await _romStorage.saveRom(entry, bytes);
 
         // Update in-memory and shared preferences list
-        _savedRoms.removeWhere((r) => r.fileName == file.name || r.id == id);
+        _savedRoms.removeWhere((r) => r.fileName == file.name || r.id == id || r.title == cleanTitle);
         _savedRoms.insert(0, entry);
+        _explicitlyClearedSavedRoms = false;
 
         if (_isRunning && _activeRomId != null && _activeRomId != id) {
           _bridge.saveState(0, romId: _activeRomId);
@@ -506,6 +581,9 @@ class GbaController extends ChangeNotifier {
       await _romStorage.deleteRom(id);
       // Retain state data so user's game progress is not lost if they re-add the ROM
       _savedRoms.removeWhere((r) => r.id == id);
+      if (_savedRoms.isEmpty) {
+        _explicitlyClearedSavedRoms = true;
+      }
       if (_activeRomId == id) {
         _activeRomId = null;
         _activeRomType = null;
